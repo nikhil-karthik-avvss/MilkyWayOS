@@ -1,6 +1,6 @@
 /*
  * Starlight — Input module
- * Mouse, keyboard, click-to-focus, dragging, taskbar, and terminal input
+ * Mouse, keyboard, menus, and terminal input
  */
 
 #include <stdio.h>
@@ -116,17 +116,56 @@ int starlight_input_process(struct starlight_server *server) {
             enum libinput_button_state state =
                 libinput_event_pointer_get_button_state(p);
 
-            if (button == BTN_LEFT) {
-                int mx = (int)input->cursor_x;
-                int my = (int)input->cursor_y;
+            int mx = (int)input->cursor_x;
+            int my = (int)input->cursor_y;
 
+            /* Right click — desktop menu */
+            if (button == BTN_RIGHT) {
+                if (state == LIBINPUT_BUTTON_STATE_PRESSED) {
+                    input->right_pressed = 1;
+
+                    /* Only open menu if clicking on empty desktop */
+                    int hit = starlight_window_at(server, mx, my);
+                    if (hit < 0 && !starlight_taskbar_hit(server, mx, my)) {
+                        nebula_open_desktop_menu(&server->desktop, mx, my);
+                    } else {
+                        nebula_close_menus(&server->desktop);
+                    }
+                } else {
+                    input->right_pressed = 0;
+                }
+                break;
+            }
+
+            if (button == BTN_LEFT) {
                 if (state == LIBINPUT_BUTTON_STATE_PRESSED) {
                     input->left_pressed = 1;
 
+                    /* Check menus first */
+                    if (server->desktop.desktop_menu.visible ||
+                        server->desktop.launcher_menu.visible) {
+                        nebula_handle_menu_click(server, mx, my);
+                        break;
+                    }
+
+                    /* Check taskbar */
                     if (starlight_taskbar_hit(server, mx, my)) {
-                        int tb_win = starlight_taskbar_window_at(server, mx, my);
-                        if (tb_win >= 0) {
-                            starlight_window_raise(server, tb_win);
+                        if (starlight_taskbar_launcher_hit(server, mx, my)) {
+                            /* Toggle launcher menu */
+                            if (server->desktop.launcher_menu.visible) {
+                                nebula_close_menus(&server->desktop);
+                            } else {
+                                int taskbar_y = display->mode.vdisplay - TASKBAR_HEIGHT;
+                                server->desktop.launcher_menu.y =
+                                    taskbar_y - (server->desktop.launcher_menu.item_count *
+                                    NEBULA_MENU_ITEM_HEIGHT + 4);
+                                nebula_open_launcher_menu(&server->desktop);
+                            }
+                        } else {
+                            int tb_win = starlight_taskbar_window_at(server, mx, my);
+                            if (tb_win >= 0) {
+                                starlight_window_raise(server, tb_win);
+                            }
                         }
                     } else {
                         int hit = starlight_window_at(server, mx, my);
@@ -136,7 +175,6 @@ int starlight_input_process(struct starlight_server *server) {
                                 &server->windows[hit];
 
                             if (starlight_window_close_btn_hit(win, mx, my)) {
-                                /* Clean up terminal if present */
                                 if (win->terminal) {
                                     pulsar_destroy(win->terminal);
                                     free(win->terminal);
@@ -167,7 +205,6 @@ int starlight_input_process(struct starlight_server *server) {
             enum libinput_key_state state =
                 libinput_event_keyboard_get_key_state(k);
 
-            /* Track modifier state */
             if (key == KEY_LEFTSHIFT || key == KEY_RIGHTSHIFT) {
                 shift_held = (state == LIBINPUT_KEY_STATE_PRESSED);
             }
@@ -176,14 +213,23 @@ int starlight_input_process(struct starlight_server *server) {
             }
 
             if (state == LIBINPUT_KEY_STATE_PRESSED) {
-                /* Ctrl+Shift+Q to quit Starlight */
+                /* Close menus on Escape */
+                if (key == KEY_ESC) {
+                    if (server->desktop.desktop_menu.visible ||
+                        server->desktop.launcher_menu.visible) {
+                        nebula_close_menus(&server->desktop);
+                        break;
+                    }
+                }
+
+                /* Ctrl+Shift+Q to quit */
                 if (ctrl_held && shift_held && key == KEY_Q) {
                     printf("[Starlight] Ctrl+Shift+Q — shutting down\n");
                     server->running = 0;
                     break;
                 }
 
-                /* Ctrl+Shift+T to open new terminal */
+                /* Ctrl+Shift+T for new terminal */
                 if (ctrl_held && shift_held && key == KEY_T) {
                     printf("[Starlight] Opening new Pulsar terminal\n");
                     static int term_x = 80;
@@ -200,13 +246,12 @@ int starlight_input_process(struct starlight_server *server) {
                     struct starlight_window *win =
                         &server->windows[server->focus];
                     if (win->terminal && win->terminal->active) {
-                        /* Handle Ctrl+C, Ctrl+D, Ctrl+Z */
                         if (ctrl_held) {
                             char ctrl_ch = 0;
-                            if (key == KEY_C) ctrl_ch = 3;   /* ETX */
-                            else if (key == KEY_D) ctrl_ch = 4;   /* EOT */
-                            else if (key == KEY_Z) ctrl_ch = 26;  /* SUB */
-                            else if (key == KEY_L) ctrl_ch = 12;  /* FF (clear) */
+                            if (key == KEY_C) ctrl_ch = 3;
+                            else if (key == KEY_D) ctrl_ch = 4;
+                            else if (key == KEY_Z) ctrl_ch = 26;
+                            else if (key == KEY_L) ctrl_ch = 12;
 
                             if (ctrl_ch) {
                                 write(win->terminal->master_fd, &ctrl_ch, 1);

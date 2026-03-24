@@ -1,10 +1,11 @@
 /*
  * Starlight — Taskbar module
- * Bottom panel showing open windows
+ * Bottom panel with launcher, window buttons, and clock
  */
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include "starlight.h"
 
 void starlight_draw_taskbar(struct starlight_framebuffer *fb,
@@ -19,9 +20,29 @@ void starlight_draw_taskbar(struct starlight_framebuffer *fb,
     starlight_draw_rect(fb, 0, ty, fb->width, 1,
                         BORDER_R, BORDER_G, BORDER_B);
 
-    /* MilkyWayOS branding */
-    starlight_draw_text_simple(fb, 10, ty + 14,
-                               "MilkyWayOS", 140, 120, 200);
+    /* Launcher button (highlighted if menu is open) */
+    int launcher_w = 110;
+    int launcher_h = TASKBAR_BTN_HEIGHT;
+    int launcher_y = ty + (TASKBAR_HEIGHT - launcher_h) / 2;
+
+    if (server->desktop.launcher_menu.visible) {
+        starlight_draw_rect(fb, 4, launcher_y, launcher_w, launcher_h,
+                           TASKBAR_BTN_ACTIVE_R, TASKBAR_BTN_ACTIVE_G,
+                           TASKBAR_BTN_ACTIVE_B);
+    } else {
+        starlight_draw_rect(fb, 4, launcher_y, launcher_w, launcher_h,
+                           TASKBAR_BTN_R, TASKBAR_BTN_G, TASKBAR_BTN_B);
+    }
+
+    /* Star icon (simple diamond) */
+    int star_cx = 16;
+    int star_cy = launcher_y + launcher_h / 2;
+    starlight_draw_rect(fb, star_cx, star_cy - 3, 1, 7, 200, 180, 255);
+    starlight_draw_rect(fb, star_cx - 3, star_cy, 7, 1, 200, 180, 255);
+    starlight_draw_rect(fb, star_cx - 1, star_cy - 1, 3, 3, 200, 180, 255);
+
+    starlight_draw_text_simple(fb, 26, launcher_y + 9,
+                               "MilkyWayOS", 180, 160, 240);
 
     /* Window buttons */
     int bx = TASKBAR_START_X;
@@ -53,11 +74,30 @@ void starlight_draw_taskbar(struct starlight_framebuffer *fb,
 
         bx += TASKBAR_BTN_WIDTH + TASKBAR_BTN_MARGIN;
     }
+
+    /* Clock on the right */
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    char clock_buf[16];
+    snprintf(clock_buf, sizeof(clock_buf), "%02d:%02d", t->tm_hour, t->tm_min);
+
+    int clock_x = fb->width - 50;
+    int clock_y = ty + 14;
+    starlight_draw_text_simple(fb, clock_x, clock_y, clock_buf,
+                               160, 150, 200);
 }
 
 int starlight_taskbar_hit(struct starlight_server *server, int x, int y) {
     int ty = server->display.mode.vdisplay - TASKBAR_HEIGHT;
     return (y >= ty);
+}
+
+int starlight_taskbar_launcher_hit(struct starlight_server *server,
+                                    int x, int y) {
+    int ty = server->display.mode.vdisplay - TASKBAR_HEIGHT;
+    int launcher_y = ty + (TASKBAR_HEIGHT - TASKBAR_BTN_HEIGHT) / 2;
+    return (x >= 4 && x < 114 && y >= launcher_y &&
+            y < launcher_y + TASKBAR_BTN_HEIGHT);
 }
 
 int starlight_taskbar_window_at(struct starlight_server *server,

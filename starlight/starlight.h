@@ -1,12 +1,13 @@
 /*
- * Starlight Display Server v0.5 — MilkyWayOS
- * Core header — now with Pulsar terminal
+ * Starlight Display Server v0.6 — MilkyWayOS
+ * Core header — with Nebula desktop environment
  */
 
 #ifndef STARLIGHT_H
 #define STARLIGHT_H
 
 #include <stdint.h>
+#include <time.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <libinput.h>
@@ -75,6 +76,20 @@
 #define PULSAR_CURSOR_G 120
 #define PULSAR_CURSOR_B 255
 
+/* Nebula desktop settings */
+#define NEBULA_MAX_STARS 300
+#define NEBULA_MENU_WIDTH 200
+#define NEBULA_MENU_ITEM_HEIGHT 28
+#define NEBULA_MENU_R 25
+#define NEBULA_MENU_G 20
+#define NEBULA_MENU_B 50
+#define NEBULA_MENU_HOVER_R 60
+#define NEBULA_MENU_HOVER_G 40
+#define NEBULA_MENU_HOVER_B 120
+#define NEBULA_MENU_BORDER_R 80
+#define NEBULA_MENU_BORDER_G 60
+#define NEBULA_MENU_BORDER_B 140
+
 #define CURSOR_SIZE 16
 #define MAX_WINDOWS 16
 
@@ -101,17 +116,16 @@ struct pulsar_cell {
 
 /* Pulsar terminal state */
 struct pulsar_terminal {
-    int master_fd;          /* PTY master */
-    pid_t child_pid;        /* Shell process */
-    int cols, rows;         /* Grid dimensions */
-    int cursor_col, cursor_row;  /* Cursor position */
-    int scroll_top;         /* First visible row in buffer */
+    int master_fd;
+    pid_t child_pid;
+    int cols, rows;
+    int cursor_col, cursor_row;
+    int scroll_top;
     struct pulsar_cell grid[PULSAR_SCROLLBACK][PULSAR_MAX_COLS];
-    int total_rows;         /* Total rows written (for scrollback) */
-    int active;             /* Is terminal alive? */
+    int total_rows;
+    int active;
 
-    /* ANSI escape sequence parser state */
-    int esc_state;          /* 0=normal, 1=got ESC, 2=got CSI */
+    int esc_state;
     char esc_buf[64];
     int esc_len;
 };
@@ -125,7 +139,6 @@ struct starlight_window {
     int visible;
     int alive;
 
-    /* Terminal (NULL if not a terminal window) */
     struct pulsar_terminal *terminal;
 };
 
@@ -146,10 +159,51 @@ struct starlight_input {
     double cursor_x;
     double cursor_y;
     int left_pressed;
+    int right_pressed;
     int dragging;
     int drag_window;
     int drag_offset_x;
     int drag_offset_y;
+};
+
+/* Nebula star */
+struct nebula_star {
+    int x, y;
+    uint8_t brightness;
+    uint8_t size;  /* 0 = 1px, 1 = 2px, 2 = 3px */
+};
+
+/* Nebula menu item */
+#define NEBULA_MAX_MENU_ITEMS 8
+
+struct nebula_menu_item {
+    char label[32];
+    int action;  /* Action ID */
+};
+
+/* Nebula menu */
+struct nebula_menu {
+    int visible;
+    int x, y;
+    struct nebula_menu_item items[NEBULA_MAX_MENU_ITEMS];
+    int item_count;
+    int hover_index;  /* Which item is hovered, -1 for none */
+};
+
+/* Menu action IDs */
+#define NEBULA_ACTION_NEW_TERMINAL 1
+#define NEBULA_ACTION_ABOUT        2
+#define NEBULA_ACTION_CLOSE_MENU   3
+
+/* Nebula desktop state */
+struct nebula_desktop {
+    struct nebula_star stars[NEBULA_MAX_STARS];
+    int star_count;
+
+    struct nebula_menu desktop_menu;   /* Right-click menu */
+    struct nebula_menu launcher_menu;  /* Taskbar launcher menu */
+
+    int about_visible;  /* Show about dialog */
 };
 
 struct starlight_server {
@@ -161,6 +215,8 @@ struct starlight_server {
     int window_count;
     int focus;
     int window_order[MAX_WINDOWS];
+
+    struct nebula_desktop desktop;
 };
 
 /* Display functions */
@@ -208,6 +264,7 @@ void starlight_draw_taskbar(struct starlight_framebuffer *fb,
                             struct starlight_server *server);
 int starlight_taskbar_hit(struct starlight_server *server, int x, int y);
 int starlight_taskbar_window_at(struct starlight_server *server, int x, int y);
+int starlight_taskbar_launcher_hit(struct starlight_server *server, int x, int y);
 
 /* Pulsar terminal functions */
 int pulsar_init(struct pulsar_terminal *term, int cols, int rows);
@@ -218,5 +275,20 @@ void pulsar_draw(struct starlight_framebuffer *fb,
                  struct starlight_window *win);
 int pulsar_create_window(struct starlight_server *server,
                          int x, int y, int w, int h);
+
+/* Nebula desktop functions */
+void nebula_init(struct nebula_desktop *desktop, int screen_w, int screen_h);
+void nebula_draw_wallpaper(struct starlight_framebuffer *fb,
+                           struct nebula_desktop *desktop);
+void nebula_draw_menu(struct starlight_framebuffer *fb,
+                      struct nebula_menu *menu, int cursor_x, int cursor_y);
+void nebula_open_desktop_menu(struct nebula_desktop *desktop, int x, int y);
+void nebula_open_launcher_menu(struct nebula_desktop *desktop);
+void nebula_close_menus(struct nebula_desktop *desktop);
+int nebula_menu_hit(struct nebula_menu *menu, int x, int y);
+int nebula_menu_item_at(struct nebula_menu *menu, int x, int y);
+int nebula_handle_menu_click(struct starlight_server *server, int x, int y);
+void nebula_draw_about(struct starlight_framebuffer *fb,
+                       struct starlight_server *server);
 
 #endif
