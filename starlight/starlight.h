@@ -1,6 +1,6 @@
 /*
- * Starlight Display Server v0.4 — MilkyWayOS
- * Core header — now with taskbar
+ * Starlight Display Server v0.5 — MilkyWayOS
+ * Core header — now with Pulsar terminal
  */
 
 #ifndef STARLIGHT_H
@@ -59,8 +59,27 @@
 #define TASKBAR_BTN_MARGIN 4
 #define TASKBAR_START_X 120
 
+/* Pulsar terminal settings */
+#define PULSAR_FONT_W 6
+#define PULSAR_FONT_H 9
+#define PULSAR_MAX_COLS 128
+#define PULSAR_MAX_ROWS 64
+#define PULSAR_SCROLLBACK 256
+#define PULSAR_TAB_WIDTH 8
+
+#define PULSAR_FG_R 180
+#define PULSAR_FG_G 200
+#define PULSAR_FG_B 255
+
+#define PULSAR_CURSOR_R 140
+#define PULSAR_CURSOR_G 120
+#define PULSAR_CURSOR_B 255
+
 #define CURSOR_SIZE 16
 #define MAX_WINDOWS 16
+
+/* Forward declarations */
+struct starlight_server;
 
 struct starlight_framebuffer {
     uint32_t width;
@@ -72,6 +91,31 @@ struct starlight_framebuffer {
     uint8_t *map;
 };
 
+/* Terminal cell */
+struct pulsar_cell {
+    char ch;
+    uint8_t fg_r, fg_g, fg_b;
+    uint8_t bg_r, bg_g, bg_b;
+    int dirty;
+};
+
+/* Pulsar terminal state */
+struct pulsar_terminal {
+    int master_fd;          /* PTY master */
+    pid_t child_pid;        /* Shell process */
+    int cols, rows;         /* Grid dimensions */
+    int cursor_col, cursor_row;  /* Cursor position */
+    int scroll_top;         /* First visible row in buffer */
+    struct pulsar_cell grid[PULSAR_SCROLLBACK][PULSAR_MAX_COLS];
+    int total_rows;         /* Total rows written (for scrollback) */
+    int active;             /* Is terminal alive? */
+
+    /* ANSI escape sequence parser state */
+    int esc_state;          /* 0=normal, 1=got ESC, 2=got CSI */
+    char esc_buf[64];
+    int esc_len;
+};
+
 struct starlight_window {
     int id;
     int x, y;
@@ -80,6 +124,9 @@ struct starlight_window {
     uint8_t bg_r, bg_g, bg_b;
     int visible;
     int alive;
+
+    /* Terminal (NULL if not a terminal window) */
+    struct pulsar_terminal *terminal;
 };
 
 struct starlight_display {
@@ -136,6 +183,9 @@ void starlight_draw_window(struct starlight_framebuffer *fb,
 void starlight_draw_text_simple(struct starlight_framebuffer *fb,
                                 int x, int y, const char *text,
                                 uint8_t r, uint8_t g, uint8_t b);
+void starlight_draw_char(struct starlight_framebuffer *fb,
+                         int x, int y, char ch,
+                         uint8_t r, uint8_t g, uint8_t b);
 
 /* Input functions */
 int starlight_input_init(struct starlight_input *input);
@@ -158,5 +208,15 @@ void starlight_draw_taskbar(struct starlight_framebuffer *fb,
                             struct starlight_server *server);
 int starlight_taskbar_hit(struct starlight_server *server, int x, int y);
 int starlight_taskbar_window_at(struct starlight_server *server, int x, int y);
+
+/* Pulsar terminal functions */
+int pulsar_init(struct pulsar_terminal *term, int cols, int rows);
+void pulsar_destroy(struct pulsar_terminal *term);
+void pulsar_process_output(struct pulsar_terminal *term);
+void pulsar_send_key(struct pulsar_terminal *term, uint32_t key, int shift);
+void pulsar_draw(struct starlight_framebuffer *fb,
+                 struct starlight_window *win);
+int pulsar_create_window(struct starlight_server *server,
+                         int x, int y, int w, int h);
 
 #endif

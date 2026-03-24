@@ -13,6 +13,7 @@ add_executable(starlight
     input.c
     window.c
     taskbar.c
+    pulsar.c
 )
 
 target_include_directories(starlight PRIVATE

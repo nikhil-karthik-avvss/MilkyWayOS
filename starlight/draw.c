@@ -136,31 +136,37 @@ void starlight_draw_rect(struct starlight_framebuffer *fb,
     }
 }
 
+/* Draw a single character at pixel position */
+void starlight_draw_char(struct starlight_framebuffer *fb,
+                         int x, int y, char ch,
+                         uint8_t r, uint8_t g, uint8_t b) {
+    if (ch < 32 || ch > 126) ch = '?';
+    int idx = ch - 32;
+
+    for (int row = 0; row < 7; row++) {
+        for (int col = 0; col < 5; col++) {
+            if (font_5x7[idx][row] & (1 << (4 - col))) {
+                int px = x + col;
+                int py = y + row;
+                if (px >= 0 && px < (int)fb->width &&
+                    py >= 0 && py < (int)fb->height) {
+                    uint32_t off = py * fb->stride + px * 4;
+                    fb->map[off + 0] = b;
+                    fb->map[off + 1] = g;
+                    fb->map[off + 2] = r;
+                    fb->map[off + 3] = 0xFF;
+                }
+            }
+        }
+    }
+}
+
 void starlight_draw_text_simple(struct starlight_framebuffer *fb,
                                 int x, int y, const char *text,
                                 uint8_t r, uint8_t g, uint8_t b) {
     int ox = x;
     for (const char *c = text; *c; c++) {
-        int ch = *c;
-        if (ch < 32 || ch > 126) ch = '?';
-        int idx = ch - 32;
-
-        for (int row = 0; row < 7; row++) {
-            for (int col = 0; col < 5; col++) {
-                if (font_5x7[idx][row] & (1 << (4 - col))) {
-                    int px = ox + col;
-                    int py = y + row;
-                    if (px >= 0 && px < (int)fb->width &&
-                        py >= 0 && py < (int)fb->height) {
-                        uint32_t off = py * fb->stride + px * 4;
-                        fb->map[off + 0] = b;
-                        fb->map[off + 1] = g;
-                        fb->map[off + 2] = r;
-                        fb->map[off + 3] = 0xFF;
-                    }
-                }
-            }
-        }
+        starlight_draw_char(fb, ox, y, *c, r, g, b);
         ox += 6;  /* 5px char + 1px spacing */
     }
 }
@@ -206,6 +212,11 @@ void starlight_draw_window(struct starlight_framebuffer *fb,
     /* Window content area */
     starlight_draw_rect(fb, win->x, win->y, win->width, win->height,
                         win->bg_r, win->bg_g, win->bg_b);
+
+    /* If this window has a terminal, draw it */
+    if (win->terminal) {
+        pulsar_draw(fb, win);
+    }
 }
 
 void starlight_draw_cursor(struct starlight_framebuffer *fb,

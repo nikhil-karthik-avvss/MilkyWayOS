@@ -44,7 +44,6 @@ void starlight_draw_taskbar(struct starlight_framebuffer *fb,
                                TASKBAR_BTN_B);
         }
 
-        /* Truncate title to fit button */
         char label[20];
         strncpy(label, win->title, 19);
         label[19] = '\0';
@@ -56,13 +55,11 @@ void starlight_draw_taskbar(struct starlight_framebuffer *fb,
     }
 }
 
-/* Check if a click is on the taskbar */
 int starlight_taskbar_hit(struct starlight_server *server, int x, int y) {
     int ty = server->display.mode.vdisplay - TASKBAR_HEIGHT;
     return (y >= ty);
 }
 
-/* Return window index if click is on a taskbar button, -1 otherwise */
 int starlight_taskbar_window_at(struct starlight_server *server,
                                 int x, int y) {
     int ty = server->display.mode.vdisplay - TASKBAR_HEIGHT;

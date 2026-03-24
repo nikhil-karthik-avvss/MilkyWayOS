@@ -1,17 +1,18 @@
 /*
- * Starlight Display Server v0.4 — MilkyWayOS
- * Window management + taskbar panel
+ * Starlight Display Server v0.5 — MilkyWayOS
+ * Now with Pulsar terminal emulator!
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <poll.h>
 #include <libinput.h>
 #include <unistd.h>
 #include "starlight.h"
 
 int main(void) {
-    printf("=== Starlight Display Server v0.4 ===\n");
-    printf("=== MilkyWayOS ===\n\n");
+    printf("=== Starlight Display Server v0.5 ===\n");
+    printf("=== MilkyWayOS — with Pulsar Terminal ===\n\n");
 
     struct starlight_server server = { 0 };
     server.running = 1;
@@ -31,24 +32,47 @@ int main(void) {
     server.input.cursor_x = server.display.mode.hdisplay / 2.0;
     server.input.cursor_y = server.display.mode.vdisplay / 2.0;
 
-    /* Create demo windows */
-    starlight_window_create(&server, 100, 100, 300, 200,
-                           "Welcome to MilkyWayOS", 20, 20, 50);
-    starlight_window_create(&server, 250, 180, 280, 180,
-                           "Nebula Desktop", 30, 15, 45);
-    starlight_window_create(&server, 450, 120, 260, 220,
-                           "Starlight v0.4", 15, 25, 40);
+    /* Open a Pulsar terminal window */
+    pulsar_create_window(&server, 100, 80, 600, 400);
 
-    printf("[Starlight] Running — Escape to exit\n");
+    printf("[Starlight] Running\n");
+    printf("[Starlight] Ctrl+Shift+T = new terminal\n");
+    printf("[Starlight] Ctrl+Shift+Q = quit\n");
 
     int li_fd = libinput_get_fd(server.input.li);
 
     while (server.running) {
-        struct pollfd pfd = { .fd = li_fd, .events = POLLIN };
-        poll(&pfd, 1, 16);
+        /* Build poll list: libinput fd + all terminal master fds */
+        struct pollfd pfds[MAX_WINDOWS + 1];
+        int nfds = 0;
 
+        pfds[nfds].fd = li_fd;
+        pfds[nfds].events = POLLIN;
+        nfds++;
+
+        for (int i = 0; i < server.window_count; i++) {
+            struct starlight_window *win = &server.windows[i];
+            if (win->alive && win->terminal && win->terminal->active) {
+                pfds[nfds].fd = win->terminal->master_fd;
+                pfds[nfds].events = POLLIN;
+                nfds++;
+            }
+        }
+
+        poll(pfds, nfds, 16);  /* ~60fps */
+
+        /* Process input */
         starlight_input_process(&server);
 
+        /* Process terminal output */
+        for (int i = 0; i < server.window_count; i++) {
+            struct starlight_window *win = &server.windows[i];
+            if (win->alive && win->terminal && win->terminal->active) {
+                pulsar_process_output(win->terminal);
+            }
+        }
+
+        /* Draw */
         struct starlight_framebuffer *fb =
             starlight_display_back_buffer(&server.display);
 
@@ -63,14 +87,22 @@ int main(void) {
             starlight_draw_window(fb, win, (idx == server.focus));
         }
 
-        /* Draw taskbar on top of everything */
+        /* Taskbar */
         starlight_draw_taskbar(fb, &server);
 
-        /* Cursor always on top */
+        /* Cursor */
         starlight_draw_cursor(fb, (int)server.input.cursor_x,
                              (int)server.input.cursor_y);
 
         starlight_display_swap(&server.display);
+    }
+
+    /* Cleanup all terminals */
+    for (int i = 0; i < server.window_count; i++) {
+        if (server.windows[i].terminal) {
+            pulsar_destroy(server.windows[i].terminal);
+            free(server.windows[i].terminal);
+        }
     }
 
     starlight_input_destroy(&server.input);

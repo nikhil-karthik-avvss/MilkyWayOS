@@ -28,6 +28,7 @@ int starlight_window_create(struct starlight_server *server,
     win->bg_b = bg_b;
     win->visible = 1;
     win->alive = 1;
+    win->terminal = NULL;
     strncpy(win->title, title, sizeof(win->title) - 1);
     win->title[sizeof(win->title) - 1] = '\0';
 
@@ -46,7 +47,6 @@ void starlight_window_close(struct starlight_server *server, int id) {
     server->windows[id].alive = 0;
     server->windows[id].visible = 0;
 
-    /* Update focus to next visible window */
     server->focus = -1;
     for (int i = server->window_count - 1; i >= 0; i--) {
         int idx = server->window_order[i];
@@ -59,14 +59,12 @@ void starlight_window_close(struct starlight_server *server, int id) {
     printf("[Starlight] Window closed: '%s'\n", server->windows[id].title);
 }
 
-/* Find topmost window at screen coordinates (checks in reverse draw order) */
 int starlight_window_at(struct starlight_server *server, int x, int y) {
     for (int i = server->window_count - 1; i >= 0; i--) {
         int idx = server->window_order[i];
         struct starlight_window *win = &server->windows[idx];
         if (!win->alive || !win->visible) continue;
 
-        /* Check including titlebar */
         int wx = win->x - WINDOW_BORDER;
         int wy = win->y - TITLEBAR_HEIGHT - WINDOW_BORDER;
         int ww = win->width + WINDOW_BORDER * 2;
@@ -79,9 +77,7 @@ int starlight_window_at(struct starlight_server *server, int x, int y) {
     return -1;
 }
 
-/* Raise window to top of draw order */
 void starlight_window_raise(struct starlight_server *server, int id) {
-    /* Find the window in the order list */
     int pos = -1;
     for (int i = 0; i < server->window_count; i++) {
         if (server->window_order[i] == id) {
@@ -91,11 +87,9 @@ void starlight_window_raise(struct starlight_server *server, int id) {
     }
     if (pos < 0) return;
 
-    /* Shift everything after it down one */
     for (int i = pos; i < server->window_count - 1; i++) {
         server->window_order[i] = server->window_order[i + 1];
     }
-    /* Put it on top */
     server->window_order[server->window_count - 1] = id;
     server->focus = id;
 }

@@ -1,6 +1,6 @@
 /*
  * Starlight — Input module
- * Mouse, keyboard, click-to-focus, dragging, and taskbar interaction
+ * Mouse, keyboard, click-to-focus, dragging, taskbar, and terminal input
  */
 
 #include <stdio.h>
@@ -27,6 +27,9 @@ static const struct libinput_interface iface = {
     .open_restricted = open_restricted,
     .close_restricted = close_restricted,
 };
+
+static int shift_held = 0;
+static int ctrl_held = 0;
 
 int starlight_input_init(struct starlight_input *input) {
     memset(input, 0, sizeof(*input));
@@ -120,7 +123,6 @@ int starlight_input_process(struct starlight_server *server) {
                 if (state == LIBINPUT_BUTTON_STATE_PRESSED) {
                     input->left_pressed = 1;
 
-                    /* Check taskbar first */
                     if (starlight_taskbar_hit(server, mx, my)) {
                         int tb_win = starlight_taskbar_window_at(server, mx, my);
                         if (tb_win >= 0) {
@@ -134,6 +136,12 @@ int starlight_input_process(struct starlight_server *server) {
                                 &server->windows[hit];
 
                             if (starlight_window_close_btn_hit(win, mx, my)) {
+                                /* Clean up terminal if present */
+                                if (win->terminal) {
+                                    pulsar_destroy(win->terminal);
+                                    free(win->terminal);
+                                    win->terminal = NULL;
+                                }
                                 starlight_window_close(server, hit);
                             } else if (starlight_window_titlebar_hit(win, mx, my)) {
                                 input->dragging = 1;
@@ -159,9 +167,56 @@ int starlight_input_process(struct starlight_server *server) {
             enum libinput_key_state state =
                 libinput_event_keyboard_get_key_state(k);
 
-            if (key == KEY_ESC && state == LIBINPUT_KEY_STATE_PRESSED) {
-                printf("[Starlight] Escape pressed — shutting down\n");
-                server->running = 0;
+            /* Track modifier state */
+            if (key == KEY_LEFTSHIFT || key == KEY_RIGHTSHIFT) {
+                shift_held = (state == LIBINPUT_KEY_STATE_PRESSED);
+            }
+            if (key == KEY_LEFTCTRL || key == KEY_RIGHTCTRL) {
+                ctrl_held = (state == LIBINPUT_KEY_STATE_PRESSED);
+            }
+
+            if (state == LIBINPUT_KEY_STATE_PRESSED) {
+                /* Ctrl+Shift+Q to quit Starlight */
+                if (ctrl_held && shift_held && key == KEY_Q) {
+                    printf("[Starlight] Ctrl+Shift+Q — shutting down\n");
+                    server->running = 0;
+                    break;
+                }
+
+                /* Ctrl+Shift+T to open new terminal */
+                if (ctrl_held && shift_held && key == KEY_T) {
+                    printf("[Starlight] Opening new Pulsar terminal\n");
+                    static int term_x = 80;
+                    static int term_y = 80;
+                    pulsar_create_window(server, term_x, term_y, 500, 350);
+                    term_x += 30;
+                    term_y += 30;
+                    if (term_x > 400) { term_x = 80; term_y = 80; }
+                    break;
+                }
+
+                /* Forward key to focused terminal */
+                if (server->focus >= 0) {
+                    struct starlight_window *win =
+                        &server->windows[server->focus];
+                    if (win->terminal && win->terminal->active) {
+                        /* Handle Ctrl+C, Ctrl+D, Ctrl+Z */
+                        if (ctrl_held) {
+                            char ctrl_ch = 0;
+                            if (key == KEY_C) ctrl_ch = 3;   /* ETX */
+                            else if (key == KEY_D) ctrl_ch = 4;   /* EOT */
+                            else if (key == KEY_Z) ctrl_ch = 26;  /* SUB */
+                            else if (key == KEY_L) ctrl_ch = 12;  /* FF (clear) */
+
+                            if (ctrl_ch) {
+                                write(win->terminal->master_fd, &ctrl_ch, 1);
+                                break;
+                            }
+                        }
+
+                        pulsar_send_key(win->terminal, key, shift_held);
+                    }
+                }
             }
             break;
         }

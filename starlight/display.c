@@ -67,7 +67,6 @@ int starlight_display_init(struct starlight_display *display) {
     memset(display, 0, sizeof(*display));
     display->front = 0;
 
-    /* Open DRM device */
     display->drm_fd = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
     if (display->drm_fd < 0) {
         fprintf(stderr, "[Starlight] Failed to open /dev/dri/card0: %s\n",
@@ -77,7 +76,6 @@ int starlight_display_init(struct starlight_display *display) {
 
     drmSetMaster(display->drm_fd);
 
-    /* Find connected output */
     drmModeRes *res = drmModeGetResources(display->drm_fd);
     if (!res) {
         fprintf(stderr, "[Starlight] Failed to get DRM resources\n");
@@ -120,10 +118,8 @@ int starlight_display_init(struct starlight_display *display) {
            display->mode.hdisplay, display->mode.vdisplay,
            display->mode.vrefresh);
 
-    /* Save current state */
     display->saved_crtc = drmModeGetCrtc(display->drm_fd, display->crtc_id);
 
-    /* Create double buffers */
     for (int i = 0; i < 2; i++) {
         if (create_fb(display->drm_fd, &display->fb[i],
                       display->mode.hdisplay, display->mode.vdisplay) < 0) {
@@ -131,7 +127,6 @@ int starlight_display_init(struct starlight_display *display) {
         }
     }
 
-    /* Set initial buffer */
     if (drmModeSetCrtc(display->drm_fd, display->crtc_id,
                        display->fb[0].fb_id, 0, 0,
                        &display->conn_id, 1, &display->mode) < 0) {
