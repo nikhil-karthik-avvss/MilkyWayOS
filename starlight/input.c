@@ -1,6 +1,6 @@
 /*
  * Starlight — Input module
- * Handles mouse and keyboard via libinput
+ * Mouse, keyboard, click-to-focus, and window dragging
  */
 
 #include <stdio.h>
@@ -48,10 +48,7 @@ int starlight_input_init(struct starlight_input *input) {
         return -1;
     }
 
-    /* Center cursor initially */
-    input->cursor_x = 0;
-    input->cursor_y = 0;
-
+    input->drag_window = -1;
     printf("[Starlight] Input initialized\n");
     return 0;
 }
@@ -76,13 +73,20 @@ int starlight_input_process(struct starlight_server *server) {
             input->cursor_x += dx;
             input->cursor_y += dy;
 
-            /* Clamp to screen bounds */
             if (input->cursor_x < 0) input->cursor_x = 0;
             if (input->cursor_y < 0) input->cursor_y = 0;
             if (input->cursor_x >= display->mode.hdisplay)
                 input->cursor_x = display->mode.hdisplay - 1;
             if (input->cursor_y >= display->mode.vdisplay)
                 input->cursor_y = display->mode.vdisplay - 1;
+
+            /* Handle window dragging */
+            if (input->dragging && input->drag_window >= 0) {
+                struct starlight_window *win =
+                    &server->windows[input->drag_window];
+                win->x = (int)input->cursor_x - input->drag_offset_x;
+                win->y = (int)input->cursor_y - input->drag_offset_y;
+            }
             break;
         }
 
@@ -93,6 +97,51 @@ int starlight_input_process(struct starlight_server *server) {
                 p, display->mode.hdisplay);
             input->cursor_y = libinput_event_pointer_get_absolute_y_transformed(
                 p, display->mode.vdisplay);
+
+            if (input->dragging && input->drag_window >= 0) {
+                struct starlight_window *win =
+                    &server->windows[input->drag_window];
+                win->x = (int)input->cursor_x - input->drag_offset_x;
+                win->y = (int)input->cursor_y - input->drag_offset_y;
+            }
+            break;
+        }
+
+        case LIBINPUT_EVENT_POINTER_BUTTON: {
+            struct libinput_event_pointer *p =
+                libinput_event_get_pointer_event(event);
+            uint32_t button = libinput_event_pointer_get_button(p);
+            enum libinput_button_state state =
+                libinput_event_pointer_get_button_state(p);
+
+            if (button == BTN_LEFT) {
+                int mx = (int)input->cursor_x;
+                int my = (int)input->cursor_y;
+
+                if (state == LIBINPUT_BUTTON_STATE_PRESSED) {
+                    input->left_pressed = 1;
+
+                    int hit = starlight_window_at(server, mx, my);
+                    if (hit >= 0) {
+                        starlight_window_raise(server, hit);
+                        struct starlight_window *win =
+                            &server->windows[hit];
+
+                        if (starlight_window_close_btn_hit(win, mx, my)) {
+                            starlight_window_close(server, hit);
+                        } else if (starlight_window_titlebar_hit(win, mx, my)) {
+                            input->dragging = 1;
+                            input->drag_window = hit;
+                            input->drag_offset_x = mx - win->x;
+                            input->drag_offset_y = my - win->y;
+                        }
+                    }
+                } else {
+                    input->left_pressed = 0;
+                    input->dragging = 0;
+                    input->drag_window = -1;
+                }
+            }
             break;
         }
 

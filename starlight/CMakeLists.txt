@@ -11,6 +11,7 @@ add_executable(starlight
     display.c
     draw.c
     input.c
+    window.c
 )
 
 target_include_directories(starlight PRIVATE
