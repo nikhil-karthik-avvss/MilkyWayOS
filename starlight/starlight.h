@@ -1,6 +1,6 @@
 /*
- * Starlight Display Server v0.6 — MilkyWayOS
- * Core header — with Nebula desktop environment
+ * Starlight Display Server v0.7 — MilkyWayOS
+ * Core header — with Nova file manager
  */
 
 #ifndef STARLIGHT_H
@@ -90,6 +90,49 @@
 #define NEBULA_MENU_BORDER_G 60
 #define NEBULA_MENU_BORDER_B 140
 
+/* Nova file manager settings */
+#define NOVA_MAX_ENTRIES 256
+#define NOVA_ENTRY_HEIGHT 22
+#define NOVA_PATHBAR_HEIGHT 26
+#define NOVA_TOOLBAR_HEIGHT 28
+#define NOVA_ICON_WIDTH 16
+#define NOVA_NAME_COL_X 24
+#define NOVA_SIZE_COL_X 280
+#define NOVA_SCROLL_AMOUNT 3
+
+/* Nova colors */
+#define NOVA_BG_R 12
+#define NOVA_BG_G 12
+#define NOVA_BG_B 28
+
+#define NOVA_PATHBAR_R 20
+#define NOVA_PATHBAR_G 16
+#define NOVA_PATHBAR_B 40
+
+#define NOVA_TOOLBAR_R 25
+#define NOVA_TOOLBAR_G 20
+#define NOVA_TOOLBAR_B 50
+
+#define NOVA_ENTRY_HOVER_R 40
+#define NOVA_ENTRY_HOVER_G 30
+#define NOVA_ENTRY_HOVER_B 80
+
+#define NOVA_ENTRY_SELECTED_R 60
+#define NOVA_ENTRY_SELECTED_G 40
+#define NOVA_ENTRY_SELECTED_B 120
+
+#define NOVA_DIR_R 120
+#define NOVA_DIR_G 160
+#define NOVA_DIR_B 255
+
+#define NOVA_FILE_R 170
+#define NOVA_FILE_G 180
+#define NOVA_FILE_B 200
+
+#define NOVA_LINK_R 140
+#define NOVA_LINK_G 220
+#define NOVA_LINK_B 180
+
 #define CURSOR_SIZE 16
 #define MAX_WINDOWS 16
 
@@ -130,6 +173,27 @@ struct pulsar_terminal {
     int esc_len;
 };
 
+/* Nova file entry */
+struct nova_entry {
+    char name[256];
+    int is_dir;
+    int is_link;
+    off_t size;
+    mode_t mode;
+};
+
+/* Nova file manager state */
+struct nova_filemanager {
+    char current_path[1024];
+    struct nova_entry entries[NOVA_MAX_ENTRIES];
+    int entry_count;
+    int scroll_offset;      /* First visible entry index */
+    int selected;           /* Selected entry index, -1 for none */
+    int hover;              /* Hovered entry, -1 for none */
+    int visible_rows;       /* How many entries fit in the window */
+    int active;
+};
+
 struct starlight_window {
     int id;
     int x, y;
@@ -140,6 +204,7 @@ struct starlight_window {
     int alive;
 
     struct pulsar_terminal *terminal;
+    struct nova_filemanager *filemanager;
 };
 
 struct starlight_display {
@@ -170,7 +235,7 @@ struct starlight_input {
 struct nebula_star {
     int x, y;
     uint8_t brightness;
-    uint8_t size;  /* 0 = 1px, 1 = 2px, 2 = 3px */
+    uint8_t size;
 };
 
 /* Nebula menu item */
@@ -178,32 +243,31 @@ struct nebula_star {
 
 struct nebula_menu_item {
     char label[32];
-    int action;  /* Action ID */
+    int action;
 };
 
-/* Nebula menu */
 struct nebula_menu {
     int visible;
     int x, y;
     struct nebula_menu_item items[NEBULA_MAX_MENU_ITEMS];
     int item_count;
-    int hover_index;  /* Which item is hovered, -1 for none */
+    int hover_index;
 };
 
 /* Menu action IDs */
-#define NEBULA_ACTION_NEW_TERMINAL 1
-#define NEBULA_ACTION_ABOUT        2
-#define NEBULA_ACTION_CLOSE_MENU   3
+#define NEBULA_ACTION_NEW_TERMINAL  1
+#define NEBULA_ACTION_ABOUT         2
+#define NEBULA_ACTION_CLOSE_MENU    3
+#define NEBULA_ACTION_FILE_MANAGER  4
 
-/* Nebula desktop state */
 struct nebula_desktop {
     struct nebula_star stars[NEBULA_MAX_STARS];
     int star_count;
 
-    struct nebula_menu desktop_menu;   /* Right-click menu */
-    struct nebula_menu launcher_menu;  /* Taskbar launcher menu */
+    struct nebula_menu desktop_menu;
+    struct nebula_menu launcher_menu;
 
-    int about_visible;  /* Show about dialog */
+    int about_visible;
 };
 
 struct starlight_server {
@@ -290,5 +354,19 @@ int nebula_menu_item_at(struct nebula_menu *menu, int x, int y);
 int nebula_handle_menu_click(struct starlight_server *server, int x, int y);
 void nebula_draw_about(struct starlight_framebuffer *fb,
                        struct starlight_server *server);
+
+/* Nova file manager functions */
+int nova_init(struct nova_filemanager *fm, const char *path);
+void nova_destroy(struct nova_filemanager *fm);
+void nova_navigate(struct nova_filemanager *fm, const char *path);
+void nova_navigate_up(struct nova_filemanager *fm);
+void nova_enter_selected(struct starlight_server *server, int win_id);
+void nova_scroll(struct nova_filemanager *fm, int delta);
+void nova_draw(struct starlight_framebuffer *fb, struct starlight_window *win,
+               int cursor_x, int cursor_y);
+int nova_create_window(struct starlight_server *server,
+                       int x, int y, int w, int h, const char *path);
+int nova_handle_click(struct starlight_server *server, int win_id,
+                      int local_x, int local_y);
 
 #endif

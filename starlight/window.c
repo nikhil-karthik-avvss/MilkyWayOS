@@ -29,6 +29,7 @@ int starlight_window_create(struct starlight_server *server,
     win->visible = 1;
     win->alive = 1;
     win->terminal = NULL;
+    win->filemanager = NULL;
     strncpy(win->title, title, sizeof(win->title) - 1);
     win->title[sizeof(win->title) - 1] = '\0';
 

@@ -136,7 +136,6 @@ void starlight_draw_rect(struct starlight_framebuffer *fb,
     }
 }
 
-/* Draw a single character at pixel position */
 void starlight_draw_char(struct starlight_framebuffer *fb,
                          int x, int y, char ch,
                          uint8_t r, uint8_t g, uint8_t b) {
@@ -167,7 +166,7 @@ void starlight_draw_text_simple(struct starlight_framebuffer *fb,
     int ox = x;
     for (const char *c = text; *c; c++) {
         starlight_draw_char(fb, ox, y, *c, r, g, b);
-        ox += 6;  /* 5px char + 1px spacing */
+        ox += 6;
     }
 }
 
@@ -199,12 +198,11 @@ void starlight_draw_window(struct starlight_framebuffer *fb,
                                win->y - TITLEBAR_HEIGHT + 10,
                                win->title, 220, 220, 240);
 
-    /* Close button (red square) */
+    /* Close button */
     starlight_draw_rect(fb, win->x + win->width - 20,
                         win->y - TITLEBAR_HEIGHT + 4,
                         16, 20,
                         CLOSE_BTN_R, CLOSE_BTN_G, CLOSE_BTN_B);
-    /* X on close button */
     starlight_draw_text_simple(fb, win->x + win->width - 17,
                                win->y - TITLEBAR_HEIGHT + 7,
                                "X", 255, 255, 255);
@@ -213,9 +211,16 @@ void starlight_draw_window(struct starlight_framebuffer *fb,
     starlight_draw_rect(fb, win->x, win->y, win->width, win->height,
                         win->bg_r, win->bg_g, win->bg_b);
 
-    /* If this window has a terminal, draw it */
+    /* Draw terminal if present */
     if (win->terminal) {
         pulsar_draw(fb, win);
+    }
+
+    /* Draw file manager if present */
+    if (win->filemanager) {
+        /* Pass cursor position — we'll use 0,0 as placeholder;
+           actual hover is updated in nova_draw */
+        nova_draw(fb, win, 0, 0);
     }
 }
 

@@ -15,6 +15,7 @@ add_executable(starlight
     taskbar.c
     pulsar.c
     nebula.c
+    nova.c
 )
 
 target_include_directories(starlight PRIVATE
