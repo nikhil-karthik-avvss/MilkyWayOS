@@ -1,6 +1,6 @@
 /*
  * Starlight — Input module
- * Mouse, keyboard, menus, terminal and file manager input
+ * Mouse, keyboard, resize, menus, terminal and file manager input
  */
 
 #include <stdio.h>
@@ -31,6 +31,34 @@ static const struct libinput_interface iface = {
 static int shift_held = 0;
 static int ctrl_held = 0;
 
+/* Detect which resize edge the cursor is on */
+int starlight_window_resize_edge(struct starlight_window *win, int x, int y) {
+    int edge = RESIZE_NONE;
+
+    int left = win->x - WINDOW_BORDER;
+    int right = win->x + win->width + WINDOW_BORDER;
+    int top = win->y - TITLEBAR_HEIGHT - WINDOW_BORDER;
+    int bottom = win->y + win->height + WINDOW_BORDER;
+
+    if (x >= left - RESIZE_GRAB && x < left + RESIZE_GRAB &&
+        y >= top && y <= bottom)
+        edge |= RESIZE_LEFT;
+
+    if (x > right - RESIZE_GRAB && x <= right + RESIZE_GRAB &&
+        y >= top && y <= bottom)
+        edge |= RESIZE_RIGHT;
+
+    if (y >= top - RESIZE_GRAB && y < top + RESIZE_GRAB &&
+        x >= left && x <= right)
+        edge |= RESIZE_TOP;
+
+    if (y > bottom - RESIZE_GRAB && y <= bottom + RESIZE_GRAB &&
+        x >= left && x <= right)
+        edge |= RESIZE_BOTTOM;
+
+    return edge;
+}
+
 int starlight_input_init(struct starlight_input *input) {
     memset(input, 0, sizeof(*input));
 
@@ -52,8 +80,63 @@ int starlight_input_init(struct starlight_input *input) {
     }
 
     input->drag_window = -1;
+    input->resize_window = -1;
     printf("[Starlight] Input initialized\n");
     return 0;
+}
+
+static void handle_pointer_move(struct starlight_server *server, double dx, double dy) {
+    struct starlight_input *input = &server->input;
+    struct starlight_display *display = &server->display;
+
+    input->cursor_x += dx;
+    input->cursor_y += dy;
+
+    if (input->cursor_x < 0) input->cursor_x = 0;
+    if (input->cursor_y < 0) input->cursor_y = 0;
+    if (input->cursor_x >= display->mode.hdisplay)
+        input->cursor_x = display->mode.hdisplay - 1;
+    if (input->cursor_y >= display->mode.vdisplay)
+        input->cursor_y = display->mode.vdisplay - 1;
+
+    if (input->dragging && input->drag_window >= 0) {
+        struct starlight_window *win = &server->windows[input->drag_window];
+        win->x = (int)input->cursor_x - input->drag_offset_x;
+        win->y = (int)input->cursor_y - input->drag_offset_y;
+    }
+
+    if (input->resizing && input->resize_window >= 0) {
+        struct starlight_window *win = &server->windows[input->resize_window];
+        int dx_total = (int)input->cursor_x - input->resize_start_x;
+        int dy_total = (int)input->cursor_y - input->resize_start_y;
+
+        int new_x = input->resize_orig_x;
+        int new_y = input->resize_orig_y;
+        int new_w = input->resize_orig_w;
+        int new_h = input->resize_orig_h;
+
+        if (input->resize_edge & RESIZE_RIGHT) {
+            new_w = input->resize_orig_w + dx_total;
+        }
+        if (input->resize_edge & RESIZE_LEFT) {
+            new_w = input->resize_orig_w - dx_total;
+            new_x = input->resize_orig_x + dx_total;
+        }
+        if (input->resize_edge & RESIZE_BOTTOM) {
+            new_h = input->resize_orig_h + dy_total;
+        }
+        if (input->resize_edge & RESIZE_TOP) {
+            new_h = input->resize_orig_h - dy_total;
+            new_y = input->resize_orig_y + dy_total;
+        }
+
+        if (new_w >= MIN_WINDOW_W && new_h >= MIN_WINDOW_H) {
+            win->x = new_x;
+            win->y = new_y;
+            win->width = new_w;
+            win->height = new_h;
+        }
+    }
 }
 
 int starlight_input_process(struct starlight_server *server) {
@@ -68,53 +151,38 @@ int starlight_input_process(struct starlight_server *server) {
 
         switch (type) {
         case LIBINPUT_EVENT_POINTER_MOTION: {
-            struct libinput_event_pointer *p =
-                libinput_event_get_pointer_event(event);
-            double dx = libinput_event_pointer_get_dx(p);
-            double dy = libinput_event_pointer_get_dy(p);
-
-            input->cursor_x += dx;
-            input->cursor_y += dy;
-
-            if (input->cursor_x < 0) input->cursor_x = 0;
-            if (input->cursor_y < 0) input->cursor_y = 0;
-            if (input->cursor_x >= display->mode.hdisplay)
-                input->cursor_x = display->mode.hdisplay - 1;
-            if (input->cursor_y >= display->mode.vdisplay)
-                input->cursor_y = display->mode.vdisplay - 1;
-
-            if (input->dragging && input->drag_window >= 0) {
-                struct starlight_window *win =
-                    &server->windows[input->drag_window];
-                win->x = (int)input->cursor_x - input->drag_offset_x;
-                win->y = (int)input->cursor_y - input->drag_offset_y;
-            }
+            struct libinput_event_pointer *p = libinput_event_get_pointer_event(event);
+            handle_pointer_move(server,
+                libinput_event_pointer_get_dx(p),
+                libinput_event_pointer_get_dy(p));
             break;
         }
 
         case LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE: {
-            struct libinput_event_pointer *p =
-                libinput_event_get_pointer_event(event);
-            input->cursor_x = libinput_event_pointer_get_absolute_x_transformed(
-                p, display->mode.hdisplay);
-            input->cursor_y = libinput_event_pointer_get_absolute_y_transformed(
-                p, display->mode.vdisplay);
+            struct libinput_event_pointer *p = libinput_event_get_pointer_event(event);
+            double new_x = libinput_event_pointer_get_absolute_x_transformed(p, display->mode.hdisplay);
+            double new_y = libinput_event_pointer_get_absolute_y_transformed(p, display->mode.vdisplay);
+            double dx = new_x - input->cursor_x;
+            double dy = new_y - input->cursor_y;
+            input->cursor_x = new_x;
+            input->cursor_y = new_y;
 
             if (input->dragging && input->drag_window >= 0) {
-                struct starlight_window *win =
-                    &server->windows[input->drag_window];
+                struct starlight_window *win = &server->windows[input->drag_window];
                 win->x = (int)input->cursor_x - input->drag_offset_x;
                 win->y = (int)input->cursor_y - input->drag_offset_y;
+            }
+            if (input->resizing && input->resize_window >= 0) {
+                /* Re-trigger resize logic */
+                handle_pointer_move(server, 0, 0);
             }
             break;
         }
 
         case LIBINPUT_EVENT_POINTER_BUTTON: {
-            struct libinput_event_pointer *p =
-                libinput_event_get_pointer_event(event);
+            struct libinput_event_pointer *p = libinput_event_get_pointer_event(event);
             uint32_t button = libinput_event_pointer_get_button(p);
-            enum libinput_button_state state =
-                libinput_event_pointer_get_button_state(p);
+            enum libinput_button_state state = libinput_event_pointer_get_button_state(p);
 
             int mx = (int)input->cursor_x;
             int my = (int)input->cursor_y;
@@ -123,11 +191,10 @@ int starlight_input_process(struct starlight_server *server) {
                 if (state == LIBINPUT_BUTTON_STATE_PRESSED) {
                     input->right_pressed = 1;
                     int hit = starlight_window_at(server, mx, my);
-                    if (hit < 0 && !starlight_taskbar_hit(server, mx, my)) {
+                    if (hit < 0 && !starlight_taskbar_hit(server, mx, my))
                         nebula_open_desktop_menu(&server->desktop, mx, my);
-                    } else {
+                    else
                         nebula_close_menus(&server->desktop);
-                    }
                 } else {
                     input->right_pressed = 0;
                 }
@@ -138,7 +205,7 @@ int starlight_input_process(struct starlight_server *server) {
                 if (state == LIBINPUT_BUTTON_STATE_PRESSED) {
                     input->left_pressed = 1;
 
-                    /* Menus first */
+                    /* Menus */
                     if (server->desktop.desktop_menu.visible ||
                         server->desktop.launcher_menu.visible) {
                         nebula_handle_menu_click(server, mx, my);
@@ -159,39 +226,41 @@ int starlight_input_process(struct starlight_server *server) {
                             }
                         } else {
                             int tb_win = starlight_taskbar_window_at(server, mx, my);
-                            if (tb_win >= 0) {
-                                starlight_window_raise(server, tb_win);
-                            }
+                            if (tb_win >= 0) starlight_window_raise(server, tb_win);
                         }
                     } else {
                         int hit = starlight_window_at(server, mx, my);
                         if (hit >= 0) {
                             starlight_window_raise(server, hit);
-                            struct starlight_window *win =
-                                &server->windows[hit];
+                            struct starlight_window *win = &server->windows[hit];
 
                             if (starlight_window_close_btn_hit(win, mx, my)) {
-                                if (win->terminal) {
-                                    pulsar_destroy(win->terminal);
-                                    free(win->terminal);
-                                    win->terminal = NULL;
-                                }
-                                if (win->filemanager) {
-                                    nova_destroy(win->filemanager);
-                                    free(win->filemanager);
-                                    win->filemanager = NULL;
-                                }
+                                if (win->terminal) { pulsar_destroy(win->terminal); free(win->terminal); win->terminal = NULL; }
+                                if (win->filemanager) { nova_destroy(win->filemanager); free(win->filemanager); win->filemanager = NULL; }
                                 starlight_window_close(server, hit);
                             } else if (starlight_window_titlebar_hit(win, mx, my)) {
                                 input->dragging = 1;
                                 input->drag_window = hit;
                                 input->drag_offset_x = mx - win->x;
                                 input->drag_offset_y = my - win->y;
-                            } else if (win->filemanager) {
-                                /* Click inside file manager content */
-                                int local_x = mx - win->x;
-                                int local_y = my - win->y;
-                                nova_handle_click(server, hit, local_x, local_y);
+                            } else {
+                                /* Check resize edges */
+                                int edge = starlight_window_resize_edge(win, mx, my);
+                                if (edge != RESIZE_NONE) {
+                                    input->resizing = 1;
+                                    input->resize_window = hit;
+                                    input->resize_edge = edge;
+                                    input->resize_start_x = mx;
+                                    input->resize_start_y = my;
+                                    input->resize_orig_x = win->x;
+                                    input->resize_orig_y = win->y;
+                                    input->resize_orig_w = win->width;
+                                    input->resize_orig_h = win->height;
+                                } else if (win->filemanager) {
+                                    int local_x = mx - win->x;
+                                    int local_y = my - win->y;
+                                    nova_handle_click(server, hit, local_x, local_y);
+                                }
                             }
                         }
                     }
@@ -199,17 +268,17 @@ int starlight_input_process(struct starlight_server *server) {
                     input->left_pressed = 0;
                     input->dragging = 0;
                     input->drag_window = -1;
+                    input->resizing = 0;
+                    input->resize_window = -1;
                 }
             }
             break;
         }
 
         case LIBINPUT_EVENT_KEYBOARD_KEY: {
-            struct libinput_event_keyboard *k =
-                libinput_event_get_keyboard_event(event);
+            struct libinput_event_keyboard *k = libinput_event_get_keyboard_event(event);
             uint32_t key = libinput_event_keyboard_get_key(k);
-            enum libinput_key_state state =
-                libinput_event_keyboard_get_key_state(k);
+            enum libinput_key_state state = libinput_event_keyboard_get_key_state(k);
 
             if (key == KEY_LEFTSHIFT || key == KEY_RIGHTSHIFT)
                 shift_held = (state == LIBINPUT_KEY_STATE_PRESSED);
@@ -226,31 +295,26 @@ int starlight_input_process(struct starlight_server *server) {
                 }
 
                 if (ctrl_held && shift_held && key == KEY_Q) {
-                    printf("[Starlight] Ctrl+Shift+Q — shutting down\n");
-                    server->running = 0;
-                    break;
+                    server->running = 0; break;
                 }
-
                 if (ctrl_held && shift_held && key == KEY_T) {
-                    static int term_x = 80, term_y = 80;
-                    pulsar_create_window(server, term_x, term_y, 500, 350);
-                    term_x += 30; term_y += 30;
-                    if (term_x > 400) { term_x = 80; term_y = 80; }
+                    static int tx = 80, ty = 80;
+                    pulsar_create_window(server, tx, ty, 500, 350);
+                    tx += 30; ty += 30;
+                    if (tx > 400) { tx = 80; ty = 80; }
                     break;
                 }
-
                 if (ctrl_held && shift_held && key == KEY_F) {
-                    static int fm_x = 100, fm_y = 80;
-                    nova_create_window(server, fm_x, fm_y, 450, 400, "/");
-                    fm_x += 30; fm_y += 30;
-                    if (fm_x > 350) { fm_x = 100; fm_y = 80; }
+                    static int fx = 100, fy = 80;
+                    nova_create_window(server, fx, fy, 450, 400, "/");
+                    fx += 30; fy += 30;
+                    if (fx > 350) { fx = 100; fy = 80; }
                     break;
                 }
 
-                /* Forward to terminal */
                 if (server->focus >= 0) {
-                    struct starlight_window *win =
-                        &server->windows[server->focus];
+                    struct starlight_window *win = &server->windows[server->focus];
+
                     if (win->terminal && win->terminal->active) {
                         if (ctrl_held) {
                             char ctrl_ch = 0;
@@ -258,15 +322,11 @@ int starlight_input_process(struct starlight_server *server) {
                             else if (key == KEY_D) ctrl_ch = 4;
                             else if (key == KEY_Z) ctrl_ch = 26;
                             else if (key == KEY_L) ctrl_ch = 12;
-                            if (ctrl_ch) {
-                                write(win->terminal->master_fd, &ctrl_ch, 1);
-                                break;
-                            }
+                            if (ctrl_ch) { write(win->terminal->master_fd, &ctrl_ch, 1); break; }
                         }
                         pulsar_send_key(win->terminal, key, shift_held);
                     }
 
-                    /* Scroll file manager with arrow keys */
                     if (win->filemanager && win->filemanager->active) {
                         if (key == KEY_UP && win->filemanager->selected > 0) {
                             win->filemanager->selected--;
@@ -278,13 +338,11 @@ int starlight_input_process(struct starlight_server *server) {
                             if (win->filemanager->selected >= win->filemanager->scroll_offset + win->filemanager->visible_rows)
                                 win->filemanager->scroll_offset = win->filemanager->selected - win->filemanager->visible_rows + 1;
                         }
-                        if (key == KEY_ENTER && win->filemanager->selected >= 0) {
+                        if (key == KEY_ENTER && win->filemanager->selected >= 0)
                             nova_enter_selected(server, server->focus);
-                        }
                         if (key == KEY_BACKSPACE) {
                             nova_navigate_up(win->filemanager);
-                            snprintf(win->title, sizeof(win->title), "Nova - %s",
-                                     win->filemanager->current_path);
+                            snprintf(win->title, sizeof(win->title), "Nova - %s", win->filemanager->current_path);
                         }
                     }
                 }

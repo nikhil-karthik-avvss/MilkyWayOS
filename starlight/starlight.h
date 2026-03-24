@@ -1,6 +1,6 @@
 /*
- * Starlight Display Server v0.7 — MilkyWayOS
- * Core header — with Nova file manager
+ * Starlight Display Server v0.8 — MilkyWayOS
+ * Core header — window resize + system info widget
  */
 
 #ifndef STARLIGHT_H
@@ -40,6 +40,17 @@
 #define CLOSE_BTN_R 180
 #define CLOSE_BTN_G 50
 #define CLOSE_BTN_B 50
+
+/* Window resize */
+#define RESIZE_GRAB 6
+#define MIN_WINDOW_W 120
+#define MIN_WINDOW_H 80
+
+#define RESIZE_NONE   0
+#define RESIZE_LEFT   1
+#define RESIZE_RIGHT  2
+#define RESIZE_TOP    4
+#define RESIZE_BOTTOM 8
 
 /* Taskbar theme */
 #define TASKBAR_HEIGHT 36
@@ -100,7 +111,6 @@
 #define NOVA_SIZE_COL_X 280
 #define NOVA_SCROLL_AMOUNT 3
 
-/* Nova colors */
 #define NOVA_BG_R 12
 #define NOVA_BG_G 12
 #define NOVA_BG_B 28
@@ -133,10 +143,14 @@
 #define NOVA_LINK_G 220
 #define NOVA_LINK_B 180
 
+/* System info widget */
+#define SYSINFO_WIDTH 180
+#define SYSINFO_HEIGHT 100
+#define SYSINFO_MARGIN 12
+
 #define CURSOR_SIZE 16
 #define MAX_WINDOWS 16
 
-/* Forward declarations */
 struct starlight_server;
 
 struct starlight_framebuffer {
@@ -149,7 +163,6 @@ struct starlight_framebuffer {
     uint8_t *map;
 };
 
-/* Terminal cell */
 struct pulsar_cell {
     char ch;
     uint8_t fg_r, fg_g, fg_b;
@@ -157,7 +170,6 @@ struct pulsar_cell {
     int dirty;
 };
 
-/* Pulsar terminal state */
 struct pulsar_terminal {
     int master_fd;
     pid_t child_pid;
@@ -167,13 +179,11 @@ struct pulsar_terminal {
     struct pulsar_cell grid[PULSAR_SCROLLBACK][PULSAR_MAX_COLS];
     int total_rows;
     int active;
-
     int esc_state;
     char esc_buf[64];
     int esc_len;
 };
 
-/* Nova file entry */
 struct nova_entry {
     char name[256];
     int is_dir;
@@ -182,15 +192,14 @@ struct nova_entry {
     mode_t mode;
 };
 
-/* Nova file manager state */
 struct nova_filemanager {
     char current_path[1024];
     struct nova_entry entries[NOVA_MAX_ENTRIES];
     int entry_count;
-    int scroll_offset;      /* First visible entry index */
-    int selected;           /* Selected entry index, -1 for none */
-    int hover;              /* Hovered entry, -1 for none */
-    int visible_rows;       /* How many entries fit in the window */
+    int scroll_offset;
+    int selected;
+    int hover;
+    int visible_rows;
     int active;
 };
 
@@ -202,7 +211,6 @@ struct starlight_window {
     uint8_t bg_r, bg_g, bg_b;
     int visible;
     int alive;
-
     struct pulsar_terminal *terminal;
     struct nova_filemanager *filemanager;
 };
@@ -213,7 +221,6 @@ struct starlight_display {
     uint32_t crtc_id;
     drmModeModeInfo mode;
     drmModeCrtc *saved_crtc;
-
     struct starlight_framebuffer fb[2];
     int front;
 };
@@ -229,16 +236,24 @@ struct starlight_input {
     int drag_window;
     int drag_offset_x;
     int drag_offset_y;
+    /* Resize state */
+    int resizing;
+    int resize_window;
+    int resize_edge;    /* Bitmask of RESIZE_LEFT/RIGHT/TOP/BOTTOM */
+    int resize_start_x;
+    int resize_start_y;
+    int resize_orig_x;
+    int resize_orig_y;
+    int resize_orig_w;
+    int resize_orig_h;
 };
 
-/* Nebula star */
 struct nebula_star {
     int x, y;
     uint8_t brightness;
     uint8_t size;
 };
 
-/* Nebula menu item */
 #define NEBULA_MAX_MENU_ITEMS 8
 
 struct nebula_menu_item {
@@ -254,7 +269,6 @@ struct nebula_menu {
     int hover_index;
 };
 
-/* Menu action IDs */
 #define NEBULA_ACTION_NEW_TERMINAL  1
 #define NEBULA_ACTION_ABOUT         2
 #define NEBULA_ACTION_CLOSE_MENU    3
@@ -263,10 +277,8 @@ struct nebula_menu {
 struct nebula_desktop {
     struct nebula_star stars[NEBULA_MAX_STARS];
     int star_count;
-
     struct nebula_menu desktop_menu;
     struct nebula_menu launcher_menu;
-
     int about_visible;
 };
 
@@ -274,99 +286,79 @@ struct starlight_server {
     struct starlight_display display;
     struct starlight_input input;
     int running;
-
     struct starlight_window windows[MAX_WINDOWS];
     int window_count;
     int focus;
     int window_order[MAX_WINDOWS];
-
     struct nebula_desktop desktop;
 };
 
-/* Display functions */
+/* Display */
 int starlight_display_init(struct starlight_display *display);
 void starlight_display_destroy(struct starlight_display *display);
 void starlight_display_swap(struct starlight_display *display);
-struct starlight_framebuffer *starlight_display_back_buffer(
-    struct starlight_display *display);
+struct starlight_framebuffer *starlight_display_back_buffer(struct starlight_display *display);
 
-/* Drawing functions */
-void starlight_draw_clear(struct starlight_framebuffer *fb,
-                          uint8_t r, uint8_t g, uint8_t b);
-void starlight_draw_rect(struct starlight_framebuffer *fb,
-                         int x, int y, int w, int h,
-                         uint8_t r, uint8_t g, uint8_t b);
-void starlight_draw_cursor(struct starlight_framebuffer *fb,
-                           int cx, int cy);
-void starlight_draw_window(struct starlight_framebuffer *fb,
-                           struct starlight_window *win, int focused);
-void starlight_draw_text_simple(struct starlight_framebuffer *fb,
-                                int x, int y, const char *text,
-                                uint8_t r, uint8_t g, uint8_t b);
-void starlight_draw_char(struct starlight_framebuffer *fb,
-                         int x, int y, char ch,
-                         uint8_t r, uint8_t g, uint8_t b);
+/* Drawing */
+void starlight_draw_clear(struct starlight_framebuffer *fb, uint8_t r, uint8_t g, uint8_t b);
+void starlight_draw_rect(struct starlight_framebuffer *fb, int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b);
+void starlight_draw_cursor(struct starlight_framebuffer *fb, int cx, int cy);
+void starlight_draw_window(struct starlight_framebuffer *fb, struct starlight_window *win, int focused);
+void starlight_draw_text_simple(struct starlight_framebuffer *fb, int x, int y, const char *text, uint8_t r, uint8_t g, uint8_t b);
+void starlight_draw_char(struct starlight_framebuffer *fb, int x, int y, char ch, uint8_t r, uint8_t g, uint8_t b);
 
-/* Input functions */
+/* Input */
 int starlight_input_init(struct starlight_input *input);
 void starlight_input_destroy(struct starlight_input *input);
 int starlight_input_process(struct starlight_server *server);
+int starlight_window_resize_edge(struct starlight_window *win, int x, int y);
 
-/* Window functions */
-int starlight_window_create(struct starlight_server *server,
-                            int x, int y, int w, int h,
-                            const char *title,
-                            uint8_t bg_r, uint8_t bg_g, uint8_t bg_b);
+/* Window */
+int starlight_window_create(struct starlight_server *server, int x, int y, int w, int h, const char *title, uint8_t bg_r, uint8_t bg_g, uint8_t bg_b);
 void starlight_window_close(struct starlight_server *server, int id);
 int starlight_window_at(struct starlight_server *server, int x, int y);
 void starlight_window_raise(struct starlight_server *server, int id);
 int starlight_window_titlebar_hit(struct starlight_window *win, int x, int y);
 int starlight_window_close_btn_hit(struct starlight_window *win, int x, int y);
 
-/* Taskbar functions */
-void starlight_draw_taskbar(struct starlight_framebuffer *fb,
-                            struct starlight_server *server);
+/* Taskbar */
+void starlight_draw_taskbar(struct starlight_framebuffer *fb, struct starlight_server *server);
 int starlight_taskbar_hit(struct starlight_server *server, int x, int y);
 int starlight_taskbar_window_at(struct starlight_server *server, int x, int y);
 int starlight_taskbar_launcher_hit(struct starlight_server *server, int x, int y);
 
-/* Pulsar terminal functions */
+/* Pulsar */
 int pulsar_init(struct pulsar_terminal *term, int cols, int rows);
 void pulsar_destroy(struct pulsar_terminal *term);
 void pulsar_process_output(struct pulsar_terminal *term);
 void pulsar_send_key(struct pulsar_terminal *term, uint32_t key, int shift);
-void pulsar_draw(struct starlight_framebuffer *fb,
-                 struct starlight_window *win);
-int pulsar_create_window(struct starlight_server *server,
-                         int x, int y, int w, int h);
+void pulsar_draw(struct starlight_framebuffer *fb, struct starlight_window *win);
+int pulsar_create_window(struct starlight_server *server, int x, int y, int w, int h);
 
-/* Nebula desktop functions */
+/* Nebula */
 void nebula_init(struct nebula_desktop *desktop, int screen_w, int screen_h);
-void nebula_draw_wallpaper(struct starlight_framebuffer *fb,
-                           struct nebula_desktop *desktop);
-void nebula_draw_menu(struct starlight_framebuffer *fb,
-                      struct nebula_menu *menu, int cursor_x, int cursor_y);
+void nebula_draw_wallpaper(struct starlight_framebuffer *fb, struct nebula_desktop *desktop);
+void nebula_draw_menu(struct starlight_framebuffer *fb, struct nebula_menu *menu, int cursor_x, int cursor_y);
 void nebula_open_desktop_menu(struct nebula_desktop *desktop, int x, int y);
 void nebula_open_launcher_menu(struct nebula_desktop *desktop);
 void nebula_close_menus(struct nebula_desktop *desktop);
 int nebula_menu_hit(struct nebula_menu *menu, int x, int y);
 int nebula_menu_item_at(struct nebula_menu *menu, int x, int y);
 int nebula_handle_menu_click(struct starlight_server *server, int x, int y);
-void nebula_draw_about(struct starlight_framebuffer *fb,
-                       struct starlight_server *server);
+void nebula_draw_about(struct starlight_framebuffer *fb, struct starlight_server *server);
 
-/* Nova file manager functions */
+/* Nova */
 int nova_init(struct nova_filemanager *fm, const char *path);
 void nova_destroy(struct nova_filemanager *fm);
 void nova_navigate(struct nova_filemanager *fm, const char *path);
 void nova_navigate_up(struct nova_filemanager *fm);
 void nova_enter_selected(struct starlight_server *server, int win_id);
 void nova_scroll(struct nova_filemanager *fm, int delta);
-void nova_draw(struct starlight_framebuffer *fb, struct starlight_window *win,
-               int cursor_x, int cursor_y);
-int nova_create_window(struct starlight_server *server,
-                       int x, int y, int w, int h, const char *path);
-int nova_handle_click(struct starlight_server *server, int win_id,
-                      int local_x, int local_y);
+void nova_draw(struct starlight_framebuffer *fb, struct starlight_window *win, int cursor_x, int cursor_y);
+int nova_create_window(struct starlight_server *server, int x, int y, int w, int h, const char *path);
+int nova_handle_click(struct starlight_server *server, int win_id, int local_x, int local_y);
+
+/* System info widget */
+void sysinfo_draw(struct starlight_framebuffer *fb, int screen_w);
 
 #endif
